@@ -491,7 +491,11 @@ class LLMEngine:
                     output.update(self._wait_workers(first_batch))
                     self.batch_output_futures.pop(0)
                     self.onfly_batch_num -= 1
-
+                    
+        self._log_system_stats(
+            scheduler_outputs.num_prompt_tokens,
+            scheduler_outputs.num_generation_tokens,
+        )
         return self._process_worker_outputs(output, scheduler_outputs), self.scheduler.req_model_cnt
 
     def get_models_in_gpu(self):

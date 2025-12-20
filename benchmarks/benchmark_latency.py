@@ -6,7 +6,8 @@ import random
 import numpy as np
 import torch
 from tqdm import tqdm
-
+from config.setting import get_config
+config = get_config()
 from vllm import LLM, SamplingParams
 
 
@@ -81,14 +82,14 @@ if __name__ == '__main__':
                     'requests till completion.')
     parser.add_argument('--model', type=str, default='facebook/opt-125m')
     parser.add_argument('--tokenizer', type=str, default=None)
-    parser.add_argument('--tensor-parallel-size', '-tp', type=int, default=1)
+    parser.add_argument('--tensor-parallel-size', '-tp', type=int, default=4)
     parser.add_argument('--pipeline-parallel-size', '-pp', type=int, default=1)
-    parser.add_argument('--input-len', type=int, default=32)
+    parser.add_argument('--input-len', type=int, default=64)
     parser.add_argument('--output-len', type=int, default=128)
     parser.add_argument("--num-groups", type=int, default=1)
-    parser.add_argument("--num-models", type=int, default=1)
+    parser.add_argument("--num-models", type=int, default=4)
     parser.add_argument("--exec-type", type=int, default=3)
-    parser.add_argument('--batch-size', type=int, default=8)
+    parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--n', type=int, default=1,
                         help='Number of generated sequences per prompt.')
     parser.add_argument('--use-beam-search', action='store_true')
@@ -97,4 +98,7 @@ if __name__ == '__main__':
     parser.add_argument('--trust-remote-code', action='store_true',
                         help='trust remote code from huggingface')
     args = parser.parse_args()
+    args.model = config.get_model_path(args.model).as_posix()
+    if args.tokenizer is None:
+        args.tokenizer = args.model
     main(args)

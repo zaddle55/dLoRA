@@ -5,6 +5,9 @@ import random
 import time
 from typing import List, Tuple
 
+from config.setting import get_config
+config = get_config()
+
 import torch
 from transformers import AutoModelForCausalLM, PreTrainedTokenizerBase
 from tqdm import tqdm
@@ -41,6 +44,7 @@ def run_vllm(
         pipeline_parallel_size=pipeline_parallel_size,
         seed=seed,
         trust_remote_code=trust_remote_code,
+        num_groups=1,
     )
 
     # TODO: hard-coded
@@ -101,7 +105,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Benchmark the throughput.")
     parser.add_argument("--backend", type=str, choices=["vllm", "hf"],
                         default="vllm")
-    parser.add_argument("--dataset", type=str, required=True,
+    parser.add_argument("--dataset", type=str, default=config.sharegpt_path.as_posix(),
                         help="Path to the dataset.")
     parser.add_argument("--model", type=str, default="facebook/opt-125m")
     parser.add_argument("--tokenizer", type=str, default=None)
@@ -126,6 +130,7 @@ if __name__ == "__main__":
     elif args.backend == "hf":
         if args.hf_max_batch_size is None:
             raise ValueError("HF max batch size is required for HF backend.")
+    args.model = config.get_model_path(args.model).as_posix()
     if args.tokenizer is None:
         args.tokenizer = args.model
 

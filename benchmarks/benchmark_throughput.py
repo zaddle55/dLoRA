@@ -5,6 +5,9 @@ import random
 import time
 from typing import List, Tuple
 
+from config.setting import get_config
+config = get_config()
+
 import torch
 from transformers import AutoModelForCausalLM, PreTrainedTokenizerBase
 from tqdm import tqdm
@@ -244,7 +247,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Benchmark the throughput.")
     parser.add_argument("--backend", type=str, choices=["vllm", "hf"],
                         default="vllm")
-    parser.add_argument("--dataset", type=str, required=True,
+    parser.add_argument("--dataset", type=str, default=config.sharegpt_path.as_posix(),
                         help="Path to the dataset.")
     parser.add_argument("--model", type=str, default="facebook/opt-125m")
     parser.add_argument("--tokenizer", type=str, default=None)
@@ -256,9 +259,9 @@ if __name__ == "__main__":
     parser.add_argument("--num-prompts", type=int, default=1000,
                         help="Number of prompts to process.")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--output-len", type=int, default=-1)
+    parser.add_argument("--output-len", type=int, default=-1) 
     parser.add_argument("--num-groups", type=int, default=1)
-    parser.add_argument("--num-models", type=int, default=1)
+    parser.add_argument("--num-models", type=int, default=4)
     parser.add_argument("--exec-type", type=int, default=3)
     parser.add_argument("--hf-max-batch-size", type=int, default=None,
                         help="Maximum batch size for HF backend.")
@@ -273,7 +276,7 @@ if __name__ == "__main__":
     elif args.backend == "hf":
         if args.hf_max_batch_size is None:
             raise ValueError("HF max batch size is required for HF backend.")
+    args.model = config.get_model_path(args.model).as_posix()
     if args.tokenizer is None:
         args.tokenizer = args.model
-
     main(args)
