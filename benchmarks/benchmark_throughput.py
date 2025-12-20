@@ -109,6 +109,7 @@ def run_vllm(
     num_groups: int,
     exec_type: int,
     num_models: int,
+    batch_size: int = 256,
 ) -> float:
     if exec_type == 1:
         num_model_per_group = num_models // num_groups
@@ -120,6 +121,7 @@ def run_vllm(
         num_model_per_group=num_model_per_group,
         exec_type=exec_type,
         tokenizer=tokenizer,
+        max_num_seqs=batch_size,
         tensor_parallel_size=tensor_parallel_size,
         pipeline_parallel_size=pipeline_parallel_size,
         seed=seed,
@@ -227,7 +229,7 @@ def main(args: argparse.Namespace):
         elapsed_time = run_vllm(
             requests, args.model, args.tokenizer, args.tensor_parallel_size, args.pipeline_parallel_size,
             args.seed, args.n, args.use_beam_search, args.trust_remote_code, args.num_groups,
-            args.exec_type, args.num_models)
+            args.exec_type, args.num_models, args.batch_size)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1 and args.pipeline_parallel_size == 1
         elapsed_time = run_hf(
@@ -258,9 +260,10 @@ if __name__ == "__main__":
     parser.add_argument("--use-beam-search", action="store_true")
     parser.add_argument("--num-prompts", type=int, default=1000,
                         help="Number of prompts to process.")
+    parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output-len", type=int, default=-1) 
-    parser.add_argument("--num-groups", type=int, default=1)
+    parser.add_argument("--num-groups", type=int, default=4)
     parser.add_argument("--num-models", type=int, default=4)
     parser.add_argument("--exec-type", type=int, default=3)
     parser.add_argument("--hf-max-batch-size", type=int, default=None,

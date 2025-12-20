@@ -20,6 +20,10 @@ TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 app = FastAPI()
 engine_manager = None
 
+@app.get("/health")
+async def health() -> Response:
+    """Health check."""
+    return Response(status_code=200)
 
 @app.post("/generate")
 async def generate(request: Request) -> Response:

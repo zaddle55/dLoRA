@@ -13,6 +13,14 @@ logger = init_logger(__name__)
 
 _GB = 1 << 30
 
+import os
+METRIC_DIR = "metrics"
+os.makedirs(METRIC_DIR, exist_ok=True)
+class MetricOutput:
+    """Metric output dir."""
+    ENGINE = os.path.join(METRIC_DIR, "engine")
+    INSTANCE = os.path.join(METRIC_DIR, "instance")
+    SCHEDULER = os.path.join(METRIC_DIR, "scheduler")
 
 class ExecType(Enum):
     REPLICATED = 1

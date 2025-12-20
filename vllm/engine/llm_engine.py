@@ -4,7 +4,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union, Dict
 import torch
 
-from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
+from vllm.config import (CacheConfig, MetricOutput, ModelConfig, ParallelConfig,
                          SchedulerConfig, LoRaConfig, ExecType)
 from vllm.core.scheduler import Scheduler, SchedulerOutputs
 from vllm.engine.arg_utils import EngineArgs
@@ -17,6 +17,7 @@ from vllm.sequence import (Sequence, SequenceGroup, SequenceGroupMetadata,
 from vllm.transformers_utils.tokenizer import (detokenize_incrementally,
                                                get_tokenizer)
 from vllm.utils import Counter
+from vllm.metric.metric_engine import EngineMetric
 
 if ray:
     from ray.air.util.torch_dist import init_torch_dist_process_group
@@ -118,7 +119,21 @@ class LLMEngine:
         self.distributed_init_method = distributed_init_method
         self.placement_groups = placement_groups
         self.all_workers = []
-
+        #=== Metric ON ===#
+        self.metric = EngineMetric(
+            output_dir=MetricOutput.ENGINE,
+            step_per_log=10
+        )
+        self.metric.init_engine(self.engine_id, {
+                "model": str(self.model_config.model),
+                "tokenizer": str(self.model_config.tokenizer),
+                "tokenizer_mode": str(self.model_config.tokenizer_mode),
+                "dtype": str(self.model_config.dtype),
+                "tensor_parallel_size": str(self.parallel_config.tensor_parallel_size),
+                "exec_type": str(self.exec_type),
+                "num_model_per_group": str(self.num_model_per_group),
+                "batch_size": str(self.scheduler_config.max_num_seqs),
+        })
     def init_cont(self, cache_gpu_memory: int, init_active_lora_types: List[int]):
 
         if self.exec_type != ExecType.REPLICATED:
@@ -565,7 +580,7 @@ class LLMEngine:
         else:
             cpu_cache_usage = 0.0
 
-        logger.info("engine "
+        logger.debug("engine "
                     f"{self.engine_id}: "
                     "Avg prompt throughput: "
                     f"{avg_prompt_throughput:.1f} tokens/s, "
@@ -579,7 +594,21 @@ class LLMEngine:
                     f"Pending: {len(self.scheduler.waiting)} reqs, "
                     f"GPU KV cache usage: {gpu_cache_usage * 100:.1f}%, "
                     f"CPU KV cache usage: {cpu_cache_usage * 100:.1f}%")
-        self.last_logging_time = now
+        #================== Metric Log START ===================#
+        if self.metric is not None:
+            self.metric.step(
+                avg_prompt_throughput,
+                avg_generation_throughput,
+                avg_jct,
+                len(self.scheduler.ready),
+                len(self.scheduler.running),
+                len(self.scheduler.swapped),
+                len(self.scheduler.waiting),
+                gpu_cache_usage,
+                cpu_cache_usage,
+            )
+        #================== Metric Log END ===================#
+        self.x = now
 
     def _decode_sequences(self, seq_groups: List[SequenceGroup]) -> None:
         """Decodes the sequence outputs."""

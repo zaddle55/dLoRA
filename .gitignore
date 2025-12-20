@@ -177,3 +177,6 @@ _build/
 # logs
 *.json
 logs/
+
+# trace
+trace/

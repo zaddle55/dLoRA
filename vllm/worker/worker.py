@@ -66,6 +66,7 @@ class Worker:
         self.adjust_cnt = 0
         self.adjust_time = 0.0
         self.execute_time = 0.0
+        self.gpu_id = None
 
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
@@ -125,6 +126,8 @@ class Worker:
 
         self.cpu_key_cache: List[torch.tensor] = []
         self.cpu_value_cache: List[torch.tensor] = []
+
+        self.gpu_id = torch.cuda.current_device() if torch.cuda.is_available() else "CPU"
 
     def init_cpu_group(self):
         assert dist.is_initialized()
@@ -498,6 +501,13 @@ class Worker:
                 for event in cache_events:
                     event.wait()
             return {}
+        
+        #======= [PROBE START] Profiling LoRA stats =======#
+        probe_start = time.time()
+        lora_stats, total_active_blocks = profile_lora_stats(seq_group_metadata_list)
+        is_merged = len(self.active) <= 1
+        mode_str = "Merged" if is_merged else f"Unmerged(Count={len(self.active)})"
+        exec_start = time.time()
 
         # with torch.profiler.profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True,) as prof:
         # If we do not use lora, we need to execute models seperatelly
@@ -538,7 +548,7 @@ class Worker:
                 )
                 output.update(model_output)
 
-        else:
+        else: # LoRa branch
             adjusted = self.adjust_lora_adapter(gpu_model_list, active_model_list)
             input_tokens, input_positions, input_metadata = self._prepare_inputs(
                 seq_group_metadata_list)
@@ -556,6 +566,20 @@ class Worker:
                 lora_weights=self.lora_engine,
                 lora_events=lora_events,
             )
+
+        torch.cuda.synchronize()
+        exec_end = time.time()
+        step_latency = (exec_end - exec_start)
+        log_msg = (
+            f"[Probe][Worker] Idx:{self.gpu_id} | "
+            f"Mode:{mode_str} | "
+            f"Latency:{step_latency * 1000:.2f}ms | "
+            f"KV_Blocks:{total_active_blocks} | "
+            f"Total_Seqs:{len(seq_group_metadata_list)} | "
+            f"Details: {lora_stats}"
+        )
+        logger.debug(log_msg)
+        #======= [PROBE END] Profiling LoRA stats =======#
         return output
 
 
@@ -604,3 +628,48 @@ def _get_num_model_in_gpu(config: PretrainedConfig):
         return 4
     else:
         return 2
+    
+#======= Added for profiling metrics =======#
+def profile_lora_stats(seq_group_metadata_list: SequenceGroupMetadata):
+    """Profile LoRA stats from sequence group metadata.
+    :args:
+        seq_group_metadata_list: @type=List[SequenceGroupMetadata]
+    :returns:
+        lora_stats: @type=Dict[int, Dict[str, int]] Dict mapping model_id to dict with 'prompt' and 'gen'
+        total_active_blocks: @type=int Total number of active LoRA blocks across all sequence groups.
+    """
+    lora_stats = {}
+    total_active_blocks = 0
+        
+    for sg in seq_group_metadata_list:
+        lid = sg.model_id
+        if lid not in lora_stats:
+            lora_stats[lid] = {'prompt': 0, 'gen': 0}
+        if sg.is_prompt:
+            lora_stats[lid]['prompt'] += 1
+        else:
+            lora_stats[lid]['gen'] += 1
+        if sg.block_tables:
+            for table in sg.block_tables.values():
+                total_active_blocks += len(table)
+    return lora_stats, total_active_blocks
+
+def compute_detailed_latency_metrics(probe_start: float, exec_start: float, exec_end: float):
+    """Compute detailed latency metrics.
+    :args:
+        probe_start: @type=float Start time of probing.
+        exec_start: @type=float Start time of execution.
+        exec_end: @type=float End time of execution.
+    :returns:
+        metrics: @type=Dict[str, float] Dict with 'probe_time', 'exec_time', 'total_time'
+    """
+    probe_time = exec_start - probe_start
+    exec_time = exec_end - exec_start
+    total_time = exec_end - probe_start
+    metrics = {
+        'probe_time': probe_time,
+        'exec_time': exec_time,
+        'total_time': total_time,
+    }
+    return metrics
+    

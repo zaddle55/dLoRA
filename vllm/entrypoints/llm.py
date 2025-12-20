@@ -10,6 +10,7 @@ from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.llm_engine import LLMEngine
+from vllm.metric.metric_engine import EngineMetric
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
 from vllm.utils import Counter
@@ -261,6 +262,21 @@ class LLM:
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             tasks = [executor.submit(self._run_engine, use_tqdm=use_tqdm, engine_id=i) for i in range(self.num_groups)]
             concurrent.futures.wait(tasks)
+            for future in concurrent.futures.as_completed(tasks):
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"❌ Engine Thread Crashed: {e}")
+                    raise e
+        # Collect metrics from all engines.
+        engine_metrics = [ engine.metric for engine in self.llm_engine ]
+        for metric in engine_metrics:
+            if metric is not None:
+                metric.summary()
+        # Combine metrics from all engines.
+        combined_metric = EngineMetric.combine(engine_metrics)
+        combined_metric.save(time.strftime("engine_metric_%Y%m%d_%H%M%S.json"))
+
 
     def _run_engine(self, use_tqdm: bool,
                     engine_id: int = 0) -> List[RequestOutput]:
