@@ -274,7 +274,7 @@ def main(args: argparse.Namespace):
             elif args.output_style == 2:
                 file.write(f"{args.exec_type},{args.num_models},{args.num_prompts / benchmark_time}\n")
             elif args.output_style == 3:
-                output = os.popen(f"bash ./ae_scripts/parse_log.sh ./ae_scripts/logs/{start_ts[0]}.log").read()
+                output = os.popen(f"bash ./ae_scripts/parse_log.sh ./logs/{start_ts[0]}.log").read()
                 output = output.split('\n')
                 queueing_delay = float(output[0].split(':')[1])
                 adjust_time = 0.0
@@ -287,7 +287,7 @@ def main(args: argparse.Namespace):
             elif args.output_style == 4:
                 file.write(f"{args.exec_type},{args.request_rate},{avg_per_output_token_latency}\n")
             elif args.output_style == 5:
-                output = os.popen(f"bash ./ae_scripts/parse_log.sh ./ae_scripts/logs/{start_ts[0]}.log fig2b").read()
+                output = os.popen(f"bash ./ae_scripts/parse_log.sh ./logs/{start_ts[0]}.log fig2b").read()
                 output = output.split('\n')
                 for line in output:
                     fields = line.split(' ')

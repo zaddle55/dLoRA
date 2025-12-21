@@ -10,6 +10,8 @@ from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
                          SchedulerConfig, ExecType)
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
+from vllm.metric.metric_engine import EngineMetric
+from vllm.metric.metric_scheduler import SchedulerMetric
 from vllm.sequence import (Sequence, SequenceGroup, SequenceGroupMetadata,
                            SequenceStatus, RequestMetadata)
 from vllm.engine.migration_ilp import MigrationILP
@@ -107,7 +109,6 @@ class EngineManager:
 
             for engine in self.engines:
                 ray.get(engine.engine.init_cont.remote(self.available_gpu_memorys[engine.engine_id], self.engine_model_mapping[engine.engine_id]))
-            
 
     @property
     def is_running(self) -> bool:
@@ -456,3 +457,59 @@ class EngineManager:
         """Set the output of the engine."""
         for engine in self.engines:
             ray.get(engine.engine.set_output.remote(output))
+
+    #==================== Metric Logging ===================
+    def save_all_engine_metrics(self) -> None:
+        """Save all engine metrics to files."""
+        print(f"[EngineManager] Collecting metrics from {len(self.engines)} engines...")
+        try:
+            futures = [engine.get_metric_ref() for engine in self.engines]
+            metrics_list = []
+            engine_metrics = []
+            scheduler_metrics = []
+            engine_metric_futures = []
+            scheduler_metric_futures = []
+            
+            # for f in futures:
+            #     if hasattr(f, 'binary'):
+            #          ray_futures.append(f)
+            #     elif "ObjectRef" in str(type(f)):
+            #          ray_futures.append(f)
+            #     else:
+            #          metrics_list.append(f)
+            for f in futures:
+                if hasattr(f[0], 'binary') or "ObjectRef" in str(type(f[0])):
+                    engine_metric_futures.append(f[0])
+                if hasattr(f[1], 'binary') or "ObjectRef" in str(type(f[1])):
+                    scheduler_metric_futures.append(f[1])
+            
+            if engine_metric_futures:
+                engine_metrics.extend(ray.get(engine_metric_futures))
+            valid_engine_metrics = [m for m in engine_metrics if m is not None]
+            if scheduler_metric_futures:
+                scheduler_metrics.extend(ray.get(scheduler_metric_futures))
+            valid_scheduler_metrics = [m for m in scheduler_metrics if m is not None]
+
+            if not valid_engine_metrics:
+                print("[EngineManager] No valid metrics collected.")
+            if not valid_scheduler_metrics:
+                print("[EngineManager] No valid scheduler metrics collected.")
+            for em, sm in zip(valid_engine_metrics, valid_scheduler_metrics):
+                em.summary()
+                sm.summarize()
+
+            combined_metric = EngineMetric.combine(valid_engine_metrics)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"engine_metric_{timestamp}.json"
+            combined_metric.save(filename)
+            print(f"[EngineManager] Successfully merged and saved metrics to {combined_metric.output_dir}/{filename}")
+            combined_metric = SchedulerMetric.combine(valid_scheduler_metrics)
+            filename = f"scheduler_metric_{timestamp}.json"
+            combined_metric.save(filename)
+            print(f"[EngineManager] Successfully merged and saved scheduler metrics to {combined_metric.output_dir}/{filename}")
+
+        except Exception as e:
+            print(f"[EngineManager] Failed to save combined metrics: {e}")
+            import traceback
+            traceback.print_exc()
+        

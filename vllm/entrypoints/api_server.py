@@ -1,4 +1,5 @@
 import argparse
+from contextlib import asynccontextmanager
 import json
 import sys
 import time
@@ -17,7 +18,14 @@ from vllm.config import ExecType
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
 TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
-app = FastAPI()
+
+#lifespan events
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    yield
+    print("Shutting down API server, saving metrics...")
+    engine_manager.save_all_engine_metrics()
+app = FastAPI(lifespan=lifespan)
 engine_manager = None
 
 @app.get("/health")
@@ -83,7 +91,6 @@ async def generate(request: Request) -> Response:
     text_outputs = [prompt + output.text for output in final_output.outputs]
     ret = {"text": text_outputs}
     return JSONResponse(ret)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

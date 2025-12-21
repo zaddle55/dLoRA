@@ -10,6 +10,7 @@ from vllm.core.scheduler import Scheduler, SchedulerOutputs
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.ray_utils import RayWorker, initialize_cluster, ray
 from vllm.logger import init_logger
+from vllm.metric.metric_scheduler import SchedulerMetric
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (Sequence, SequenceGroup, SequenceGroupMetadata,
@@ -120,10 +121,7 @@ class LLMEngine:
         self.placement_groups = placement_groups
         self.all_workers = []
         #=== Metric ON ===#
-        self.metric = EngineMetric(
-            output_dir=MetricOutput.ENGINE,
-            step_per_log=10
-        )
+        self.metric = EngineMetric(step_per_log=10)
         self.metric.init_engine(self.engine_id, {
                 "model": str(self.model_config.model),
                 "tokenizer": str(self.model_config.tokenizer),
@@ -144,7 +142,7 @@ class LLMEngine:
         self._init_cache(cache_gpu_memory, init_active_lora_types)
 
         # Create the scheduler.
-        self.scheduler = Scheduler(self.scheduler_config, self.cache_config, self.lora_config,
+        self.scheduler = Scheduler(self.engine_id, self.scheduler_config, self.cache_config, self.lora_config,
                                    self.num_model_per_group, self.active, self.exec_type)
 
         # Logging.
@@ -786,3 +784,11 @@ class LLMEngine:
                 stage = batch[stage_id]
                 ready, _ = ray.wait(stage, timeout=0.0)
                 return ready
+    
+    #================== Metric Retrieval ===================#
+    def retrieve_metric(self) -> EngineMetric:
+        """Retrieve engine metric."""
+        return self.metric
+    def retrieve_scheduler_metric(self) -> SchedulerMetric:
+        """Retrieve scheduler metric."""
+        return self.scheduler.metric

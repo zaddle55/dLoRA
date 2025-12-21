@@ -7,6 +7,7 @@ import os
 
 # ================= 配置区域 =================
 JSON_FILE = "metrics/engine/engine_metric_*.json" 
+output_path = "benchmark_results/dlora_serving_load_balance_report5.png"
 # ===========================================
 
 def load_data(pattern):
@@ -50,10 +51,10 @@ def load_data(pattern):
         
     return df
 
-def plot_dashboard(df):
+def plot_dashboard(df, args):
     sns.set_theme(style="whitegrid")
     fig, axes = plt.subplots(2, 2, figsize=(18, 12))
-    fig.suptitle('dLoRA Load Balancing Dashboard', fontsize=20)
+    fig.suptitle(f'dLoRA Load Balancing Dashboard at req_rate = {args.req_rate} req/s, num_models = {args.num_models}', fontsize=20)
 
     # ------------------------------------------------------
     # 图 1: 负载均衡情况 (Pending + Running Requests)
@@ -99,14 +100,20 @@ def plot_dashboard(df):
     axes[1, 1].grid(False)
 
     plt.tight_layout()
-    plt.savefig("benchmark_results/dlora_load_balance_report.png")
-    print("✅ 图表已保存为 benchmark_results/dlora_load_balance_report.png")
+    output_path = f"benchmark_results/serving_load_balance_report_rr{args.req_rate}_nm{args.num_models}.png"
+    plt.savefig(output_path)
+    print(f"✅ 图表已保存为 {output_path}")
     plt.show()
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="dLoRA Load Balancing Visualization")
+    parser.add_argument("--req-rate", type=int, default=12, help="请求速率 (requests per second)")
+    parser.add_argument("--num-models", type=int, default=4, help="模型数量")
+    args = parser.parse_args()
     df = load_data(JSON_FILE)
     if df is not None and not df.empty:
         df["engine_id"] = df["engine_id"].astype(str)
-        plot_dashboard(df)
+        plot_dashboard(df, args)
     else:
         print("没有足够的数据进行绘图。")

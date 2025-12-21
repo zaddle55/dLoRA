@@ -1,7 +1,8 @@
 from typing import List
 from vllm.metric.metric_base import MetricPrototype
+from vllm.config import MetricOutput
 class EngineMetric(MetricPrototype):
-    def __init__(self, output_dir: str, step_per_log: int = 1):
+    def __init__(self, step_per_log: int = 1):
         """
         引擎级别的数据收集器。
 
@@ -9,7 +10,7 @@ class EngineMetric(MetricPrototype):
             output_dir (str): 数据输出的文件夹路径。
             step_per_log (int): 每隔多少步记录一次数据，默认为 1。
         """
-        super().__init__(output_dir, "engine_metric", step_per_log)
+        super().__init__(MetricOutput.ENGINE, "engine_metric", step_per_log)
         self.engine_id = 0
         self.engine_args = {}
 
@@ -79,7 +80,7 @@ class EngineMetric(MetricPrototype):
 
     @staticmethod
     def combine(metrics: List["EngineMetric"]) -> "EngineMetric":
-        combined_metric = EngineMetric(output_dir=metrics[0].output_dir)
+        combined_metric = EngineMetric()
         for metric in metrics:
             combined_metric.records.append({
                 "engine_id": metric.engine_id,

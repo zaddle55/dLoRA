@@ -80,7 +80,7 @@ class ResourceDownloader:
                 local_dir=download_path,
                 local_dir_use_symlinks=False, # 必须为False，否则无法移动
                 resume_download=True,
-                token=self.hf_token
+                # token=self.hf_token
             )
             
             # 简单验证
@@ -201,10 +201,6 @@ def run_downloads(
     :param dataset_list: list of strings, e.g. ["tatsu-lab/alpaca"]
     :param hf_token: HuggingFace User Access Token
     """
-    
-    if not hf_token:
-        print("错误: 必须提供 HF_TOKEN")
-        return
 
     downloader = ResourceDownloader(hf_token=hf_token)
     
@@ -228,10 +224,8 @@ if __name__ == "__main__":
     # 配置你想下载的内容
     TARGET_MODELS = [
         # "EleutherAI/gpt-j-6b",
-        "EleutherAI/pythia-70m",
-        "bigscience/bloom-560m",
-        "mosaicml/mpt-7b",
-        "tiiuae/falcon-7b",
+        "NousResearch/Llama-2-7b-hf",
+        "NousResearch/Llama-2-13b-hf",
     ]
     
     TARGET_DATASETS = [

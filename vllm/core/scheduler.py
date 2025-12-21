@@ -6,6 +6,7 @@ from vllm.config import CacheConfig, SchedulerConfig, LoRaConfig, ExecType
 from vllm.core.block_manager import BlockSpaceManager
 from vllm.core.policy import PolicyFactory
 from vllm.logger import init_logger
+from vllm.metric.metric_scheduler import SchedulerMetric
 from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceGroupMetadata, SequenceOutputs,
                            SequenceStatus, RequestMetadata)
@@ -60,6 +61,7 @@ class Scheduler:
 
     def __init__(
         self,
+        engine_id: int,
         scheduler_config: SchedulerConfig,
         cache_config: CacheConfig,
         lora_config: LoRaConfig,
@@ -126,6 +128,8 @@ class Scheduler:
 
         self.preempt_cnt = 0
         self.swap_cnt = 0
+        #====== Metric ON ======#
+        self.metric = SchedulerMetric(scheduler_config=self.scheduler_config, engine_id=engine_id, step_per_log=10)
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.
@@ -336,7 +340,7 @@ class Scheduler:
             model_req_mapping = dict(sorted(model_req_mapping.items(), key=lambda x: len(x[1]), reverse=True))
             max_model = list(model_req_mapping.keys())[0]
             max_num_model_reqs = len(model_req_mapping[max_model])
-            if len(self.active) == 1 and self.active[0] in model_req_mapping and len(model_req_mapping[self.active[0]]) >= self.merge_left_threshold * len(scheduled_by_fcfs): # use previous batch
+            if self.merged and len(self.active) == 1 and self.active[0] in model_req_mapping and len(model_req_mapping[self.active[0]]) >= self.merge_left_threshold * len(scheduled_by_fcfs): # use previous batch
                 assert self.merged == True or self.num_models == 1
                 to_merge = True
                 self.num_iters += 1
@@ -1165,6 +1169,11 @@ class Scheduler:
                 model_id=seq_group.model_id,
             )
             seq_group_metadata_list.append(seq_group_metadata)
+        # Log scheduler state.
+        try:
+            self._log_scheduler_state()
+        except Exception as e:
+            logger.warning(f"Failed to log scheduler state: {e}")
         return seq_group_metadata_list, scheduler_outputs
 
     def update(
@@ -1324,3 +1333,49 @@ class Scheduler:
         blocks_to_swap_out.update(mapping)
         for seq in seq_group.get_seqs(status=SequenceStatus.READY):
             seq.status = SequenceStatus.SWAPPED
+
+    
+    def _log_scheduler_state(self) -> None:
+        if self.metric is not None:
+            waiting_lora_dist = {}
+            running_lora_dist = {}
+            for seq_group in self.waiting:
+                lid = seq_group.model_id
+                if lid in waiting_lora_dist:
+                    waiting_lora_dist[lid] += seq_group.num_seqs()
+                else:
+                    waiting_lora_dist[lid] = seq_group.num_seqs()
+            for seq_group in self.running:
+                lid = seq_group.model_id
+                if lid in running_lora_dist:
+                    running_lora_dist[lid] += seq_group.num_seqs()
+                else:
+                    running_lora_dist[lid] = seq_group.num_seqs()
+                
+            free_gpu_blocks = self.block_manager.get_num_free_gpu_blocks()
+            t_merge = self.merge_time * self.num_iters
+            t_unmerge = self.unmerge_time * self.num_iters
+            if self.merged:
+                t_merge += self.switch_cost
+            else:
+                t_unmerge += self.switch_cost
+                t_merge += self.switch_cost * self.virtual_switch_cnt
+            
+            tput_merge = self.merge_batch_cnt / t_merge
+            tput_unmerge = self.unmerge_batch_cnt / t_unmerge
+            
+            self.metric.step(
+                waiting_len=len(self.waiting),
+                running_len=len(self.running),
+                swapped_len=len(self.swapped),
+                free_gpu_blocks=free_gpu_blocks,
+                active_loras=self.active,
+                waiting_lora_dist=waiting_lora_dist,
+                running_lora_dist=running_lora_dist,
+                lora_credit=self.lora_credit.copy(),
+                merge_left_thresh=self.merge_left_threshold,
+                merge_right_thresh=self.merge_right_threshold,
+                num_iters=self.num_iters,
+                tput_merge=tput_merge,
+                tput_unmerge=tput_unmerge,
+            )

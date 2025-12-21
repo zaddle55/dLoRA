@@ -8,6 +8,7 @@ from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.llm_engine import LLMEngine
 from vllm.engine.ray_utils import initialize_cluster, ray
+from vllm.metric.metric_engine import EngineMetric
 from vllm.sequence import (Sequence, SequenceGroup, SequenceGroupMetadata,
                            SequenceStatus, RequestMetadata)
 from vllm.logger import init_logger
@@ -204,7 +205,10 @@ class _AsyncLLMEngine(LLMEngine):
             blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
             blocks_to_copy=scheduler_outputs.blocks_to_copy,
         )
-
+        self._log_system_stats(
+            scheduler_outputs.num_prompt_tokens,
+            scheduler_outputs.num_generated_tokens,
+        )
         return self._process_worker_outputs(output, scheduler_outputs), self.scheduler.req_model_cnt
 
     async def _run_workers_async(
@@ -561,3 +565,13 @@ class AsyncLLMEngine:
                      log_stats=not engine_args.disable_log_stats,
                      start_engine_loop=start_engine_loop)
         return engine
+    
+    #==================== Metric Logging ===================
+    def get_metric_ref(self) -> tuple["ray.ObjectRef", "ray.ObjectRef"]:
+        """Get the metric ray object reference."""
+        if self.engine_use_ray:
+            return (self.engine.retrieve_metric.remote(),
+                    self.engine.retrieve_scheduler_metric.remote())
+        else:
+            return (self.engine.retrieve_metric(),
+                    self.engine.retrieve_scheduler_metric())

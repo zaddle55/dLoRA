@@ -3,7 +3,7 @@
 # ================= 配置区域 =================
 # 环境设置
 source ~/.bashrc
-conda activate dlora  # 换成你的环境名
+conda activate dlora
 PROJECT_ROOT="/home/lizz_lab/cse12310823/dLoRA-artifact"
 cd $PROJECT_ROOT
 export PYTHONPATH=$PROJECT_ROOT:$PYTHONPATH
@@ -11,16 +11,17 @@ export PYTHONPATH=$PROJECT_ROOT:$PYTHONPATH
 # 参数配置
 MODEL_PATH="/home/lizz_lab/cse12310823/models_cache/models/facebook--opt-125m"
 PORT=8000
-HOST="127.0.0.1"  # 同节点通信用 localhost 即可
-NUM_MODELS=4
-NUM_GROUPS=4      # 对应 GPU 数量或副本数
+HOST="127.0.0.1"
+NUM_MODELS=8
+NUM_GROUPS=4
 TP_SIZE=1
 TRACE_NAME="azure_v2"
 TRACE_PATH="${PROJECT_ROOT}/trace/"
+REQUEST_RATE=$1
+LOAD_BALANCE_VIS_PATH="${PROJECT_ROOT}/ae_scripts/vis_loadbal.py"
 
 # ================= 第一步：启动 Ray =================
 echo "🚀 [1/4] Starting Ray instance on node $(hostname)..."
-# 清理旧残留
 ray stop --force > /dev/null 2>&1
 # 启动本地 Ray 头节点
 ray start --head --num-cpus=32 --num-gpus=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l) --disable-usage-stats --include-dashboard=False
@@ -89,7 +90,7 @@ python benchmarks/benchmark_serving.py \
     --tokenizer $MODEL_PATH \
     --num-models $NUM_MODELS \
     --num-prompts 1000 \
-    --request-rate 4.0 \
+    --request-rate $REQUEST_RATE \
     --trust-remote-code \
     --trace_name $TRACE_NAME \
     --trace_path $TRACE_PATH 
@@ -104,5 +105,9 @@ kill $SERVER_PID
 # 停止 Ray
 ray stop --force
 
-echo "All done. Log saved to logs/bench_${SLURM_JOB_ID}.log"
+# ================= 数据记录并可视化 =================
+echo "📊 Generating Load Balancing Visualization..."
+python $LOAD_BALANCE_VIS_PATH --req-rate $REQUEST_RATE --num-models $NUM_MODELS
+
+echo "All done. Log saved to logs/server_output_$(date +%s).log"
 exit $BENCH_EXIT_CODE
