@@ -100,7 +100,7 @@ def plot_dashboard(df, args):
     axes[1, 1].grid(False)
 
     plt.tight_layout()
-    output_path = f"benchmark_results/serving_load_balance_report_rr{args.req_rate}_nm{args.num_models}.png"
+    output_path = f"benchmark_results/serving_load_balance_report_rr{args.req_rate}_nm{args.num_models}_a{args.alpha}.png"
     plt.savefig(output_path)
     print(f"✅ 图表已保存为 {output_path}")
     plt.show()
@@ -110,6 +110,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="dLoRA Load Balancing Visualization")
     parser.add_argument("--req-rate", type=int, default=12, help="请求速率 (requests per second)")
     parser.add_argument("--num-models", type=int, default=4, help="模型数量")
+    parser.add_argument("--alpha", type=float, default=0.3, help="EMA 平滑参数 alpha")
     args = parser.parse_args()
     df = load_data(JSON_FILE)
     if df is not None and not df.empty:

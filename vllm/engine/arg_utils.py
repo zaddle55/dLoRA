@@ -28,6 +28,7 @@ class EngineArgs:
     max_num_batched_tokens: int = 4096
     max_num_seqs: int = 16
     policy: str = 'credit'
+    alpha: float = 1.0
     exec_type: int = 3
     num_groups: int = 1
     num_models: int = 1
@@ -138,6 +139,10 @@ class EngineArgs:
                             type=str,
                             default=EngineArgs.policy,
                             help='scheduling policy')
+        parser.add_argument('--alpha',
+                            type=float,
+                            default=EngineArgs.alpha,
+                            help='alpha value for the merge policy')
         parser.add_argument('--exec-type',
                             type=int,
                             default=EngineArgs.exec_type,
@@ -194,7 +199,8 @@ class EngineArgs:
         scheduler_config = SchedulerConfig(self.max_num_batched_tokens,
                                            self.max_num_seqs,
                                            model_config.get_max_model_len(),
-                                           self.policy)
+                                           self.policy,
+                                           self.alpha,)
         lora_config = LoRaConfig(self.max_r, self.num_models, self.gpu_capacity)
         return model_config, cache_config, parallel_config, scheduler_config, lora_config
 

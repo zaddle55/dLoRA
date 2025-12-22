@@ -12,13 +12,15 @@ export PYTHONPATH=$PROJECT_ROOT:$PYTHONPATH
 MODEL_PATH="/home/lizz_lab/cse12310823/models_cache/models/facebook--opt-125m"
 PORT=8000
 HOST="127.0.0.1"
-NUM_MODELS=8
+NUM_MODELS=$2
 NUM_GROUPS=4
 TP_SIZE=1
 TRACE_NAME="azure_v2"
 TRACE_PATH="${PROJECT_ROOT}/trace/"
 REQUEST_RATE=$1
+ALPHA=$3  # EMA平滑参数 alpha
 LOAD_BALANCE_VIS_PATH="${PROJECT_ROOT}/ae_scripts/vis_loadbal.py"
+SCHEDULER_VIS_PATH="${PROJECT_ROOT}/ae_scripts/vis_sched.py"
 
 # ================= 第一步：启动 Ray =================
 echo "🚀 [1/4] Starting Ray instance on node $(hostname)..."
@@ -39,6 +41,7 @@ python -m vllm.entrypoints.api_server \
     --disable-log-requests \
     --worker-use-ray \
     --engine-use-ray \
+    --alpha $ALPHA \
     --trust-remote-code \
     > logs/server_output_$(date +%s).log 2>&1 &
 
@@ -89,7 +92,7 @@ python benchmarks/benchmark_serving.py \
     --dataset "${PROJECT_ROOT}/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json" \
     --tokenizer $MODEL_PATH \
     --num-models $NUM_MODELS \
-    --num-prompts 1000 \
+    --num-prompts 600 \
     --request-rate $REQUEST_RATE \
     --trust-remote-code \
     --trace_name $TRACE_NAME \
@@ -107,7 +110,9 @@ ray stop --force
 
 # ================= 数据记录并可视化 =================
 echo "📊 Generating Load Balancing Visualization..."
-python $LOAD_BALANCE_VIS_PATH --req-rate $REQUEST_RATE --num-models $NUM_MODELS
+python $LOAD_BALANCE_VIS_PATH --req-rate $REQUEST_RATE --num-models $NUM_MODELS --alpha $ALPHA
+echo "📊 Generating Scheduler Visualization..."
+python $SCHEDULER_VIS_PATH --req-rate $REQUEST_RATE --num-models $NUM_MODELS --alpha $ALPHA
 
 echo "All done. Log saved to logs/server_output_$(date +%s).log"
 exit $BENCH_EXIT_CODE

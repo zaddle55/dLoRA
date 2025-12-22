@@ -11,7 +11,8 @@ from typing import List, Dict, Any
 # 采样时间窗口大小 (秒)，用于对齐不同 Engine 的数据
 TIME_RESAMPLE_RULE = '1S' 
 ENGINE_METRIC_PATTERN = "metrics/engine/engine_metric_*.json"
-SCHEDULER_METRIC_PATTERN = "metrics/scheduler/scheduler_metric_*.json" 
+SCHEDULER_METRIC_PATTERN = "metrics/scheduler/scheduler_metric_*.json"
+CSV_OUTPUT_PATH = "benchmark_results/rr_nm_a_tput.csv"
 # ===========================================
 
 def load_json_data(pattern: str) -> List[Dict]:
@@ -133,7 +134,7 @@ def preprocess_metrics(engine_data: List[Dict], scheduler_data: List[Dict]) -> p
             throughputs = np.pad(throughputs, (0, pad_len), 'constant')
 
         # === 核心计算：负载失衡度 (Jain's Index based) ===
-        IMBALANCE_THRESHOLD = 4 # 最小 Pressure 才计算失衡度
+        IMBALANCE_THRESHOLD = 10 # 最小 Pressure 才计算失衡度
         sum_P = np.sum(pressures)
         if sum_P <= IMBALANCE_THRESHOLD:
             raw_imbalance = 0.0 # 绝对平衡
@@ -182,7 +183,7 @@ def preprocess_metrics(engine_data: List[Dict], scheduler_data: List[Dict]) -> p
         
     return df_system, df_sched
 
-def plot_analysis(df: pd.DataFrame, df_sched: pd.DataFrame = None):
+def plot_analysis(args, df: pd.DataFrame, df_sched: pd.DataFrame = None):
     """绘制分析图表"""
     if df.empty:
         print("❌ 没有数据可绘图")
@@ -255,19 +256,42 @@ def plot_analysis(df: pd.DataFrame, df_sched: pd.DataFrame = None):
     else:
         axes[3].set_visible(False)
     
-    plt.title('Scheduler Merge Thresholds Dynamics', fontsize=16)
+    plt.title(f'Scheduler Merge Thresholds Dynamics', fontsize=16)
     ax5.set_xlabel('Time (seconds) from Start', fontsize=14)
 
-
-
     plt.tight_layout()
-    output_path = "benchmark_results/system_load_analysis.png"
+    output_path = f"benchmark_results/system_load_analysis_rr{args.req_rate}_nm{args.num_models}_a{args.alpha}.png"
     plt.savefig(output_path)
     print(f"✅ 图表已保存至: {output_path}")
     plt.show()
 
+def write_csv_line(df_sys: pd.DataFrame, args, path: str):
+    """将 args 和 平均指标写入 CSV 文件的一行"""
+    avg_imbalance = df_sys['load_imbalance'].mean()
+    avg_throughput = df_sys['total_throughput'].mean()
+    avg_gpu_usage = df_sys['avg_gpu_usage'].mean()
+    mode_left_merge_thresh = df_sys['avg_merge_left_thresh'].mode()[0] if 'avg_merge_left_thresh' in df_sys else np.nan
+    mode_right_merge_thresh = df_sys['avg_merge_right_thresh'].mode()[0] if 'avg_merge_right_thresh' in df_sys else np.nan
+    
+    header = ['req_rate', 'num_models', 'alpha', 'avg_load_imbalance', 'avg_throughput', 'avg_gpu_usage', 'mode_left_merge_thresh', 'mode_right_merge_thresh']
+    line = [args.req_rate, args.num_models, args.alpha, avg_imbalance, avg_throughput, avg_gpu_usage, mode_left_merge_thresh, mode_right_merge_thresh]
+    
+    file_exists = os.path.isfile(path)
+    with open(path, 'a') as f:
+        if not file_exists:
+            f.write(','.join(header) + '\n')
+        f.write(','.join(map(str, line)) + '\n')
+    print(f"✅ 统计数据已写入 {path}")  
+
+
 # ================= 主程序 =================
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="dLoRA Scheduler Metrics Visualization")
+    parser.add_argument("--req-rate", type=int, default=12, help="请求速率 (requests per second)")
+    parser.add_argument("--num-models", type=int, default=4, help="模型数量")
+    parser.add_argument("--alpha", type=float, default=0.3, help="EMA 平滑参数 alpha")
+    args = parser.parse_args()
     # 1. 加载数据
     engine_data = load_json_data(ENGINE_METRIC_PATTERN)
     scheduler_data = load_json_data(SCHEDULER_METRIC_PATTERN)
@@ -281,9 +305,9 @@ if __name__ == "__main__":
         print(df_system[['load_imbalance', 'total_throughput', 'avg_merge_right_thresh']].describe())
         
         # 4. 生成图表
-        plot_analysis(df_system, df_sched)
+        plot_analysis(args, df_system, df_sched)
         
-        # 5. 可选：保存处理后的数据以便进一步分析
-        df_system.to_csv("processed_system_metrics.csv", index=False)
+        # 5. 写入 CSV 统计数据
+        write_csv_line(df_system, args, CSV_OUTPUT_PATH)
     else:
         print("程序终止：无数据。")

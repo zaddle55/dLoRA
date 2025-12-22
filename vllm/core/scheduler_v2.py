@@ -344,7 +344,7 @@ class Scheduler:
         self.virtual_switch_cnt = 0
         self.max_model = -1
     
-    def _credit_schedule(self) -> SchedulerOutputs:
+    def _credit_schedule_old(self) -> SchedulerOutputs:
 
         # here we assume that the number of seqs in one seq_group is 1 and batch size is self.scheduler_config.max_num_seqs(ignoring the limitation of gpu memory)
         scheduled_by_fcfs: List[SequenceGroup] = []
@@ -358,6 +358,139 @@ class Scheduler:
         queued.extend(self.swapped)
         now = time.time()
         queued = self.policy.sort_by_priority(now, queued)
+        if not queued:
+            return self._prepare_scheduleroutputs([])
+
+        scheduled_by_fcfs = queued[:self.scheduler_config.max_num_seqs]
+
+        model_req_mapping = {i: [] for i in range(self.num_models)}
+        for seq_group in queued:
+            model_req_mapping[seq_group.model_id].append(seq_group)
+        
+        scheduled_by_credit = []
+        num_to_schedule = self.scheduler_config.max_num_seqs
+        # check if any model's credit is over threshold
+        # if so, schedule it
+
+        self.lora_credit = dict(sorted(self.lora_credit.items(), key=lambda x: x[1], reverse=True))
+
+        credit_models: List[int] = []
+
+        for model_id in self.lora_credit.keys():
+            if self.lora_credit[model_id] < self.credit_left_threshold:
+                break
+            if self.lora_credit[model_id] >= self.credit_right_threshold or (model_id in self.previous_credit_models and self.lora_credit[model_id] >= self.credit_left_threshold):
+                num = min(num_to_schedule, len(model_req_mapping[model_id]))
+                scheduled_by_credit.extend(model_req_mapping[model_id][:num])
+                credit_models.append(model_id)
+                num_to_schedule -= num
+                if num_to_schedule == 0:
+                    break
+        self.previous_credit_models = credit_models
+
+        if num_to_schedule == self.scheduler_config.max_num_seqs: # try to schedule by batch
+            model_req_mapping = {model_id: model_req_mapping[model_id] for model_id in model_req_mapping if self.lora_credit[model_id] >= self.credit_base}
+            model_req_mapping = dict(sorted(model_req_mapping.items(), key=lambda x: len(x[1]), reverse=True))
+            max_model = list(model_req_mapping.keys())[0]
+            max_num_model_reqs = len(model_req_mapping[max_model])
+            if self.merged and len(self.active) == 1 and self.active[0] in model_req_mapping and len(model_req_mapping[self.active[0]]) >= self.merge_left_threshold * len(scheduled_by_fcfs): # use previous batch
+                assert self.merged == True or self.num_models == 1
+                to_merge = True
+                self.num_iters += 1
+                scheduled_by_batch = model_req_mapping[self.active[0]]
+                scheduled = scheduled_by_batch
+                self._adjust_credit(scheduled_by_fcfs, scheduled, self.batch_credit_cost)
+            elif max_num_model_reqs >= self.merge_right_threshold * len(scheduled_by_fcfs): # use batch
+                # self._adjust_merge_threshold()
+                self._adjust_merge_threshold_ema()
+                to_merge = True
+                self.merged = True
+                self.num_iters = 1
+                scheduled_by_batch = model_req_mapping[max_model][:self.scheduler_config.max_num_seqs]
+                scheduled = scheduled_by_batch
+                self.active = [max_model]
+                if max_model not in self.models_in_gpu:
+                    self.models_in_gpu[0] = max_model
+                self._adjust_credit(scheduled_by_fcfs, scheduled, self.batch_credit_cost)
+
+            else: # use fcfs
+                if self.max_model != max_model:
+                    self.virtual_switch_cnt += 1
+                    self.max_model = max_model
+                scheduled_by_batch = model_req_mapping[max_model][:self.scheduler_config.max_num_seqs]
+                scheduled = scheduled_by_fcfs
+            
+            self.merge_batch_cnt += min(len(scheduled_by_batch), self.scheduler_config.max_num_seqs)
+            self.unmerge_batch_cnt += min(len(scheduled_by_fcfs), self.scheduler_config.max_num_seqs)
+
+
+        elif num_to_schedule == 0: # use credit
+            scheduled = scheduled_by_credit
+            self._adjust_credit(scheduled_by_fcfs, scheduled, self.credit_cost)
+        else: # use credit + fcfs
+            scheduled = scheduled_by_credit
+            for seq_group in scheduled_by_fcfs:
+                if seq_group not in scheduled:
+                    scheduled.append(seq_group)
+                    num_to_schedule -= 1
+                    if num_to_schedule == 0:
+                        break
+            self._adjust_credit(scheduled_by_fcfs, scheduled, self.credit_cost)
+
+        if not to_merge:
+            if self.merged:
+                # self._adjust_merge_threshold()
+                self._adjust_merge_threshold_ema()
+                self.merged = False
+                self.num_iters = 1
+            else:
+                self.num_iters += 1
+
+            model_set = set()
+            model_cnt = 0
+            scheduled_capacity = []
+            for id, seq_group in enumerate(scheduled):
+                if seq_group.model_id not in model_set:
+                    if model_cnt >= self.lora_config.gpu_capacity:
+                        continue
+                    model_set.add(seq_group.model_id)
+                    model_cnt += 1
+                scheduled_capacity.append(seq_group)
+
+            scheduled = scheduled_capacity
+
+            assert len(model_set) <= len(self.models_in_gpu)
+
+            self.models_in_gpu = sorted(self.models_in_gpu, key=lambda x: self.req_model_cnt[x])
+            idx = 0
+            for model_id in model_set:
+                if model_id not in self.models_in_gpu:
+                    while self.models_in_gpu[idx] in model_set:
+                        idx += 1
+                    self.models_in_gpu[idx] = model_id
+                    idx += 1
+
+            self.models_in_gpu = sorted(self.models_in_gpu)
+            self.active = self.models_in_gpu.copy()
+        
+
+        return self._prepare_scheduleroutputs(scheduled)
+    
+    def _credit_schedule(self) -> SchedulerOutputs:
+
+        # here we assume that the number of seqs in one seq_group is 1 and batch size is self.scheduler_config.max_num_seqs(ignoring the limitation of gpu memory)
+        scheduled_by_fcfs: List[SequenceGroup] = []
+        scheduled_by_credit: List[SequenceGroup] = []
+        scheduled_by_batch: List[SequenceGroup] = []
+        to_merge = False
+
+        queued: List[SequenceGroup] = []
+        queued.extend(self.waiting)
+        queued.extend(self.ready)
+        queued.extend(self.swapped)
+        # now = time.time()
+        if queued:
+            queued.sort(key=self._mlfq_sort_key, reverse=False)
         if not queued:
             return self._prepare_scheduleroutputs([])
 
@@ -1196,6 +1329,8 @@ class Scheduler:
             if self.policy_name == "fcfs":
                 scheduler_outputs = self._strict_fcfs_schedule(self.lora_config.gpu_capacity)
             elif self.policy_name == "credit":
+                scheduler_outputs = self._credit_schedule_old()
+            elif self.policy_name == "mlfq":
                 scheduler_outputs = self._credit_schedule()
             else:
                 scheduler_outputs = self._always_merge_schedule()
@@ -1305,6 +1440,34 @@ class Scheduler:
                     blocks_to_copy[src_block].append(dst_block)
                 else:
                     blocks_to_copy[src_block] = [dst_block]
+
+    def _get_mlfq_priority(
+            self,
+            seq_group: SequenceGroup,
+    ) -> int:
+        # Similar to MLFQ, we define priority levels based on the number of tokens
+        # generated so far. Sequence groups that have generated fewer tokens
+        # have higher priority.
+        seq_sample = seq_group.get_seqs()[0]
+        num_generated_tokens = seq_sample.get_output_len()
+        if num_generated_tokens < 10:
+            return 0 # Q0: highest priority
+        elif num_generated_tokens < 256:
+            return 1 # Q1
+        elif num_generated_tokens < 512:
+            return 2 # Q2
+        else:
+            return 3 # Q3: lowest priority
+
+    def _mlfq_sort_key(
+            self,
+            seq_group: SequenceGroup,
+    ) -> Tuple[int, float]:
+        # First Key: priority level
+        # Second Key: arrival time
+        priority = self._get_mlfq_priority(seq_group)
+        arrival_time = seq_group.arrival_time
+        return (priority, arrival_time)
 
     def _preempt(
         self,
