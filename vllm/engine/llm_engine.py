@@ -6,7 +6,7 @@ import torch
 
 from vllm.config import (CacheConfig, MetricOutput, ModelConfig, ParallelConfig,
                          SchedulerConfig, LoRaConfig, ExecType)
-from vllm.core.scheduler import Scheduler, SchedulerOutputs
+from vllm.core.scheduler_v2 import Scheduler, SchedulerOutputs
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.ray_utils import RayWorker, initialize_cluster, ray
 from vllm.logger import init_logger

@@ -1450,7 +1450,7 @@ class Scheduler:
         # have higher priority.
         seq_sample = seq_group.get_seqs()[0]
         num_generated_tokens = seq_sample.get_output_len()
-        if num_generated_tokens < 10:
+        if num_generated_tokens < 128:
             return 0 # Q0: highest priority
         elif num_generated_tokens < 256:
             return 1 # Q1

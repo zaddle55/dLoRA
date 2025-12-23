@@ -24,6 +24,7 @@ import time
 from typing import AsyncGenerator, List, Tuple
 
 import aiohttp
+import httpx
 import numpy as np
 from transformers import PreTrainedTokenizerBase
 from vllm.transformers_utils.tokenizer import get_tokenizer
@@ -32,6 +33,7 @@ from vllm.workload_generator import trace
 # (prompt len, output len, latency)
 REQUEST_LATENCY: List[Tuple[int, int, float]] = []
 REQUEST_RECORD: List[Tuple[int, float, float, int, int]] = []
+REQUEST_TTFT: List[float] = []
 start_ts = [0]
 
 def sample_requests(
@@ -170,7 +172,7 @@ async def send_request(
             "top_p": 1.0,
             "max_tokens": output_len,
             "ignore_eos": True,
-            "stream": False,
+            "stream": True,
             "ts": start_ts[0] if is_first else 0,
         }
     elif backend == "tgi":
@@ -187,19 +189,26 @@ async def send_request(
     else:
         raise ValueError(f"Unknown backend: {backend}")
 
-    timeout = aiohttp.ClientTimeout(total=12 * 3600)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        while True:
-            async with session.post(api_url, headers=headers, json=pload) as response:
-                chunks = []
-                async for chunk, _ in response.content.iter_chunks():
-                    chunks.append(chunk)
-            output = b"".join(chunks).decode("utf-8")
-            output = json.loads(output)
-
-            # Re-send the request if it failed.
-            if "error" not in output:
-                break
+    timeout = httpx.Timeout(12 * 3600)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("POST", api_url, json=pload) as response:
+            buffer = ""
+            # 逐块读取网络流
+            is_first_chunk = True
+            async for chunk in response.aiter_text():
+                if is_first_chunk:
+                    ttft_time = time.time()
+                    ttft_latency = ttft_time - request_start_time
+                    REQUEST_TTFT.append(ttft_latency)
+                    is_first_chunk = False
+                buffer += chunk
+                while "\0" in buffer:
+                    message, buffer = buffer.split("\0", 1)
+                    if not message:
+                        continue
+                    output = json.loads(message)
+                    if "error" in output:
+                        break
 
     request_end_time = time.time()
     request_latency = request_end_time - request_start_time
@@ -298,6 +307,9 @@ def main(args: argparse.Namespace):
                     exec_time = float(fields[2])
                     queueing_ratio = queueing_delay / (queueing_delay + exec_time)
                     file.write(f"{replica_id},{queueing_ratio}\n")
+            elif args.output_style == 6:
+                avg_ttft = np.mean(REQUEST_TTFT)
+                file.write(f"{args.policy},{args.request_rate},{args.num_models},{avg_ttft:.4f}\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
