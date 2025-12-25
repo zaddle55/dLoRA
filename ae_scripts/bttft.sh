@@ -19,8 +19,10 @@ TRACE_NAME="azure_v2"
 TRACE_PATH="${PROJECT_ROOT}/trace/"
 REQUEST_RATE=$2
 POLICY=$1  # scheduling policy
-OUTPUT_STYLE=6
+EXEC_TYPE=$6
+OUTPUT_STYLE=$5
 OUTPUT_PATH=$4
+ALPHA=$7
 LOAD_BALANCE_VIS_PATH="${PROJECT_ROOT}/ae_scripts/vis_loadbal.py"
 SCHEDULER_VIS_PATH="${PROJECT_ROOT}/ae_scripts/vis_sched.py"
 
@@ -45,6 +47,8 @@ python -m vllm.entrypoints.api_server \
     --engine-use-ray \
     --trust-remote-code \
     --policy $POLICY \
+    --exec-type $EXEC_TYPE \
+    --alpha $ALPHA \
     > logs/server_output_$(date +%s).log 2>&1 &
 
 # 获取刚才启动的 Server 进程 ID (PID)，用于稍后关闭它
@@ -100,6 +104,7 @@ python benchmarks/benchmark_serving.py \
     --output_style $OUTPUT_STYLE \
     --output $OUTPUT_PATH \
     --policy $POLICY \
+    --exec_type $EXEC_TYPE \
     --trace_name $TRACE_NAME \
     --trace_path $TRACE_PATH 
 

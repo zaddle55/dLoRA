@@ -4,7 +4,7 @@
 # policy 网格
 POLICIES=("mlfq" "credit")
 # num-models 网格
-NUM_MODELS_LIST=(8 10)
+NUM_MODELS_LIST=(6)
 # req-rate 网格
 REQUEST_RATES=(4 8 12 16 20)
 # benchmark serving 脚本路径

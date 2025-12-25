@@ -42,3 +42,16 @@ $$\bar{T}_{merge}(t) = (1 - \alpha) \cdot \bar{T}_{merge}(t-1) + \alpha \cdot \h
 - $thresh_{high}$：高阈值，大于该值的任务优先级最低
 
 引入后，系统的TTFT（Time To First Token）指标得到了改善。
+
+| | Request_Rate | TTFT(s) |
+|---|---|---|
+| FCFS | $4.0$| $41.7381$ |
+| gtoken+FCFS | $4.0$ | $\mathbb{38.3467}$ |
+| FCFS | $8.0$ | $70.8421$ |
+| gtoken+FCFS | $8.0$ | $\mathbb{61.2164}$ |
+| FCFS | $12.0$ | $70.1873$ |
+| gtoken+FCFS | $12.0$ | $\mathbb{70.0172}$ |
+| FCFS | $16.0$ | $77.9349$ |
+| gtoken+FCFS | $16.0$ | $\mathbb{74.1178}$ |
+| FCFS | $20.0$ | $84.7885$ |
+| gtoken+FCFS | $20.0$ | $\mathbb{74.6248}$ |
